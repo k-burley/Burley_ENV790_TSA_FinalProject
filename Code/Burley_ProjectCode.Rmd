@@ -1,0 +1,175 @@
+---
+title: "TSA - Final Project Instructions"
+subtitle: "Predicting Marginal Emissions"
+author: "Katherine Burley"
+output: pdf_document
+geometry: margin=2.54cm
+---
+
+## CREATE A REPOSITORY IN YOUR GITHUB ACCOUNT (optional)
+
+1. Go to your user account on GitHub an navigate to the repositories tab. 
+
+3. In the upper right corner, click the green "New" button. 
+
+4. Name your repository with recommended naming conventions (suggestion: *Lastname1Lastname2Lastname3_ENV790_TSA_FinalProject*). Write a short description of the purpose of the repository. Check the box to initialize the repository with a README. Add a .gitignore for R and add a GNU General Public License v3.0.
+
+5. Invite other group members as collaborators to the repository.
+
+## LINK YOUR REPO TO YOUR LOCAL DRIVE WITH RSTUDIO (optional)
+ 
+1. Click the "Clone or download" button for your repository and then the "copy" icon. Make sure the box header lists "Clone with HTTPS" rather than "Clone with SSH." If not, click the "Use HTTPS" button and then copy the link.
+
+2. Launch RStudio and select "New Project" from the File menu. Choose "Version Control" and "Git."
+
+3. Paste the repository URL and give your repository a name and a file path.
+
+## CHOOSE A DATASET AND A RESEARCH QUESTION
+
+1. Choose a dataset of interest. 
+
+2. Describe what you want to do with the dataset and why. 
+
+## COMPLETE YOUR PROJECT REPORT
+
+### General Guidelines
+
+1. Use Rmd for your final report.
+
+2. Write in scientific style, not narrative style.
+
+3. [Global options for R chunks](https://rmarkdown.rstudio.com/lesson-3.html) should be set so that only relevant output is displayed. Turn on/off messages and warnings when applicable to avoid unnecessary outputs on the pdf.
+  # Use chunk setting to hide warnings, output of loading libraries, etc. 
+
+4. Make sure your final knitted PDF looks professional. Format tables, figures, chapters, etc.
+
+5. Make sure the PDF file has the file name "Lastname_ENV790_Project.pdf" and submit it to Sakai under A10 - Final Project. You will only submit your PDF file.
+
+### Contents of the Report 
+
+#### Introduction, Motivation, Relevance, Objectives
+*Write a few paragraphs detailing the rationale for your study. This should include both the context of the topic as well as a rationale for your choice of dataset (reason for location, variables, etc.). You may choose to include citations if you like or any other reference you may have used during the project (optional).*
+
+In the US, electricity generation from renewable sources is increasing rapidly. In 2022, generation from renewable sources surpassed generation from coal for the first time (US EIA 2023). The shift from fossil-fuel based generation towards renewables can help reduce greenhouse gas emissions and support climate change mitigation efforts. However, many renewable energy sources, such as solar and wind, are intermittent and only produce when the resource (sun or wind) is available. This can create challenges for reliability and potentially lead to a greater reliance on dirty, "peaker" plants that are dispatched to balance out rapid changes in electricity supply or demand (Blondeau and Mertons 2019. Thus, there is an increasing need for supply and demand side solutions that can help balance supply and demand on the grid without the use of conventional generators. 
+
+Demand-side management is a tool to support grid reliability by using incentives, education, or technology to modify the demand for electricity by end users. Demand-side management (DSM) has traditionally been used to reduce costs of operations, manage the grid during peak demand times, and enhance customer service, but in recent years DSM is also being considered as a tool to reduce greenhouse gas emissions. Many DSM interventions are tied to the marginal cost of electricity, which is intended to reflect the cost of producing an additional unit (ex. kWh, MWh) of electricity at any given time and location. Marginal emissions factors (or marginal emissions rates) express a similar idea - the emissions associated with producing an additional unit of electricity. Marginal emissions rates can be incorporated with DSM strategies and technology (TOU, smart thermostats) to avoid and reduce emissions from power generation and improve grid reliability. Marginal emissions are considered to be a reliable metric for evaluating the avoided emissions associated with supply and demand-side interventions (Silers-Evans et al. 2012). However, in the US only RTOs and ISOs that operate regional markets report marginal emissions rates, leaving out much of the Southeast.
+
+The goal of this project is to predict five-minute marginal emissions rates for Dominion Energy's transmission zone within the PJM Interconnection regional transmission organization. This project will serve as an exploratory analysis to asses the seasonal patterns and trends of marginal emissions rates and to identify independent variables that might be appropriate useful for predicting marginal emissions. Dominion Energy was chosen for its geographic similarity to North Carolina and availability of marginal emissions data through PJM. Ultimately, this will inform future effort to estimate marginal emissions rates for areas (like NC) where this information is not publicly available.
+
+#### Dataset information
+```{r message = FALSE, warning=FALSE}
+# Load Libraries
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(lubridate)
+library(ggplot2)
+library(forecast)  
+library(tseries)
+library(outliers)
+library(tidyverse)
+library(smooth)
+library(kableExtra)
+```
+## Data Collection
+*Provide information on how the dataset for this analysis were collected (source), the data contained in the dataset (format). Describe how you wrangled/processed your dataset to get the time series object.*
+
+*Add a table that summarizes your data structure (variables, units, ranges and/or central tendencies, data source if multiple are used, etc.). This table should inserted as a `kable` function in an R chunk. Just show the first 10 rows of your data. Do not include the code used to generate your table.*
+
+The primary dataset used for this project was five-minute marginal emissions rates for the Dominion Energy zone within the PJM system. This data was collected from PJM's data management platform, Data Miner 2. The platform includes publicly available data related to the PJM system, such as generation, load, and locational marginal prices. The online platform includes 6 months of the most recent data and data beyond this time frame is archived and only accessible through the Data Miner 2 API. Data was extracted for the period
+
+```{r message = FALSE, warning=FALSE}
+# Bring in data
+me_1022 <- read.csv("../Data/dom_me_10_22.csv",
+                    header=TRUE)
+me_1122 <- read.csv("../Data/dom_me_11_22.csv",
+                    header=TRUE)
+me_1222 <- read.csv("../Data/dom_me_12_22.csv",
+                    header=TRUE)
+me_0123 <- read.csv("../Data/dom_me_1_23.csv",
+                    header=TRUE)
+me_0223 <- read.csv("../Data/dom_me_2_23.csv",
+                    header=TRUE)
+me_0323 <- read.csv("../Data/dom_me_3_23.csv",
+                    header=TRUE)
+me_0423 <- read.csv("../Data/dom_me_4_23.csv",
+                    header=TRUE)
+
+# Clean Data
+me_data_orig <- me_1022 %>%
+  bind_rows(me_1122, me_1222, me_0123, me_0223, me_0323, me_0423)
+  
+rm(me_1022, me_1122, me_1222, me_0123, me_0223, me_0323, me_0423)
+
+me_data <- me_data_orig %>%
+  mutate(datetime = as_datetime(datetime_beginning_ept, tz = "EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
+  mutate(date = as_date(datetime_beginning_ept, tz="EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
+  select(datetime, date, marginal_co2_rate)
+
+# Initial Plots - look for outliers
+ggplot(me_data, aes(y=marginal_co2_rate, x=datetime)) +
+            geom_line()
+
+# Check for how many outliers - some values in the millions.
+quantile(me_data$marginal_co2_rate, probs = c(0.01, .25, .5, .75, 0.99))
+q01 <- quantile(me_data$marginal_co2_rate, probs = c(0.01))
+q99 <- quantile(me_data$marginal_co2_rate, probs = c(0.99))
+
+length(me_data$datetime[(me_data$marginal_co2_rate<q01) | (me_data$marginal_co2_rate>q99)]) # 874 large outliers
+
+# :oop to remove all outliers with rm.outlier
+pvalue <- 0 #just making sure we enter the while loop
+me_co2 <- me_data$marginal_co2_rate  #Create new vector to preserve data
+nout <- 0 #keep track of number of outliers removed
+while(pvalue < 0.05){ #the algorithm only enter the loop if the p-value 
+                 #of first chi_test is less than 0.05 i.e. if there 
+                 #is an outlier that needs to be removed
+  out_test <- grubbs.test(me_co2,type=10)
+  pvalue <- out_test$p.value   #Update p-value every time we run the test for a new Aux_Y
+  
+  if(pvalue < 0.05){
+    me_co2 <- rm.outlier(me_co2,fill=TRUE) #replacing outliers
+    nout <- nout+1
+  } 
+}
+
+cat("Number of outliers removed: ",nout,"\n") # 2.5% of data. 
+
+# Append to DF 
+me_data$me_co2_rate <- me_co2
+
+ggplot(me_data, aes(y=me_co2_rate, x=datetime)) +
+            geom_line() # Looks MUCH better
+
+# Check for negative values 
+length(me_data$datetime[me_data$marginal_co2_rate<0]) # 539 negative
+
+# Check for zero values
+length(me_data$datetime[me_data$marginal_co2_rate==0]) # 175 == 0
+
+# Check for missing values
+sum(is.na(me_data$marginal_co2_rate))
+```
+
+
+#### Analysis (Methods and Models)
+
+Describe the analysis and tests that were performed. Described the components of the time series you identified. List any packages and functions used. Include visualizations of your dataset (i.e. time series plot, ACF, PACF, etc). 
+
+Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.
+
+Each figure should be accompanied by a caption, and referenced within the text if applicable.
+
+#### Summary and Conclusions
+
+Summarize your major findings from your analyses in a few paragraphs and plots. What conclusions do you draw from your findings? Any insights on how to improve the model?
+
+#### Sources
+https://www.eia.gov/todayinenergy/detail.php?id=55960
+
+
+
+
+
+
+

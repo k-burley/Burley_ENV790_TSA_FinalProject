@@ -74,9 +74,7 @@ library(kableExtra)
 ## Data Collection
 *Provide information on how the dataset for this analysis were collected (source), the data contained in the dataset (format). Describe how you wrangled/processed your dataset to get the time series object.*
 
-*Add a table that summarizes your data structure (variables, units, ranges and/or central tendencies, data source if multiple are used, etc.). This table should inserted as a `kable` function in an R chunk. Just show the first 10 rows of your data. Do not include the code used to generate your table.*
-
-The primary dataset used for this project was five-minute marginal emissions rates for the Dominion Energy zone within the PJM system. This data was collected from PJM's data management platform, Data Miner 2. The platform includes publicly available data related to the PJM system, such as generation, load, and locational marginal prices. The online platform includes 6 months of the most recent data and data beyond this time frame is archived and only accessible through the Data Miner 2 API. Data was extracted for the period
+The primary dataset used for this project was five-minute marginal emissions rates for the Dominion Energy zone within the PJM system. This data was collected from PJM's data management platform, Data Miner 2. The platform includes publicly available data related to the PJM system, such as generation, load, and locational marginal prices. The online platform includes 6 months of the most recent data and data beyond this time frame is archived and only accessible through the Data Miner 2 API. Data was extracted for the most recent 6-month period from 10/7/22 to 4/7/23. The original dataset includes variables for the datetime (in EPT and UTC time zones), pricing node name and ID (aggregate node for Dominion Energy's transmission zone), and the marginal CO2, SO2, and NOx emissions rates. For this project only the marginal CO2 emissions rate is used. 
 
 ```{r message = FALSE, warning=FALSE}
 # Bring in data
@@ -105,7 +103,11 @@ me_data <- me_data_orig %>%
   mutate(datetime = as_datetime(datetime_beginning_ept, tz = "EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
   mutate(date = as_date(datetime_beginning_ept, tz="EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
   select(datetime, date, marginal_co2_rate)
+```
 
+One of the first steps of processing and cleaning the data was to check for outliers and missing values. Initial visualization revealed that there were some large outliers which appeared to be additive, with some observations in the millions compared to values of -168 and 7558 at the 1st and 99th percentile, respectively. Outlier values were identified and replaced using the Grubbs test and *rm.outlier()* function. This process updated the values for 1,288 observations, representing about 2.5% of the dataset. Visual checks on the series with updated values appears much more regular and aligns with expectations. No missing values were detected in the series. 
+
+``` {r}
 # Initial Plots - look for outliers
 ggplot(me_data, aes(y=marginal_co2_rate, x=datetime)) +
             geom_line()
@@ -117,7 +119,7 @@ q99 <- quantile(me_data$marginal_co2_rate, probs = c(0.99))
 
 length(me_data$datetime[(me_data$marginal_co2_rate<q01) | (me_data$marginal_co2_rate>q99)]) # 874 large outliers
 
-# :oop to remove all outliers with rm.outlier
+# Loop to remove all outliers with rm.outlier
 pvalue <- 0 #just making sure we enter the while loop
 me_co2 <- me_data$marginal_co2_rate  #Create new vector to preserve data
 nout <- 0 #keep track of number of outliers removed
@@ -125,7 +127,7 @@ while(pvalue < 0.05){ #the algorithm only enter the loop if the p-value
                  #of first chi_test is less than 0.05 i.e. if there 
                  #is an outlier that needs to be removed
   out_test <- grubbs.test(me_co2,type=10)
-  pvalue <- out_test$p.value   #Update p-value every time we run the test for a new Aux_Y
+  pvalue <- out_test$p.value   #Update p-value every time we run the test 
   
   if(pvalue < 0.05){
     me_co2 <- rm.outlier(me_co2,fill=TRUE) #replacing outliers
@@ -150,15 +152,40 @@ length(me_data$datetime[me_data$marginal_co2_rate==0]) # 175 == 0
 # Check for missing values
 sum(is.na(me_data$marginal_co2_rate))
 ```
+*Add a table that summarizes your data structure (variables, units, ranges and/or central tendencies, data source if multiple are used, etc.). This table should inserted as a `kable` function in an R chunk. Just show the first 10 rows of your data. Do not include the code used to generate your table.*
+```{r}
+# Table to Summarize
+sum_stats <- me_data %>%
+  rename(meco2rate = me_co2_rate) %>%
+  select(meco2rate) %>% # select variables to summarise
+  summarise_each(funs(obs = n(),
+                      min = min, 
+                      q25 = quantile(., 0.25), 
+                      median = median, 
+                      q75 = quantile(., 0.75), 
+                      max = max,
+                      mean = mean, 
+                      sd = sd)) %>%
+  mutate(varname = "me_co2_rate",
+         units = "lbs/MWh") %>%
+  select(varname, units, everything())
 
+kable(sum_stats, 
+      col.names = c("Variable Name", "Unit", "Observations", "Minimum", "Q25", "Median", "Q75", "Maximum", "Mean", "Std. Dev."),
+      caption = "Descriptive Statistics - DOM Five Minute Marginal Emissions (10/7/22 00:00 - 4/7/23 23:55)",
+      digits = array(1, ncol(sum_stats_long)),
+      table.attr = "style = \"color: black;\"") %>%
+  kable_styling(full_width = FALSE, position = "center",latex_options = "hold_position")
+
+```
 
 #### Analysis (Methods and Models)
 
-Describe the analysis and tests that were performed. Described the components of the time series you identified. List any packages and functions used. Include visualizations of your dataset (i.e. time series plot, ACF, PACF, etc). 
+*Describe the analysis and tests that were performed. Described the components of the time series you identified. List any packages and functions used. Include visualizations of your dataset (i.e. time series plot, ACF, PACF, etc).*
 
-Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.
+*Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.*
 
-Each figure should be accompanied by a caption, and referenced within the text if applicable.
+*Each figure should be accompanied by a caption, and referenced within the text if applicable.*
 
 #### Summary and Conclusions
 

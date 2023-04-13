@@ -64,6 +64,7 @@ library(readxl)
 library(writexl)
 library(lubridate)
 library(ggplot2)
+library(ggpubr)
 library(forecast)  
 library(tseries)
 library(outliers)
@@ -95,29 +96,50 @@ me_0423 <- read.csv("../Data/dom_me_4_23.csv",
 
 # Clean Data
 me_data_orig <- me_1022 %>%
-  bind_rows(me_1122, me_1222, me_0123, me_0223, me_0323, me_0423)
+  bind_rows(me_1122, me_1222, me_0123, me_0223, me_0323, me_0423) %>%
+  mutate(datetime = as_datetime(datetime_beginning_ept, tz = "EST5EDT", format = "%m/%d/%Y %I:%M:%S %p"))
   
 rm(me_1022, me_1122, me_1222, me_0123, me_0223, me_0323, me_0423)
 
-me_data <- me_data_orig %>%
-  mutate(datetime = as_datetime(datetime_beginning_ept, tz = "EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
-  mutate(date = as_date(datetime_beginning_ept, tz="EST5EDT", format = "%m/%d/%Y %I:%M:%S %p")) %>%
-  select(datetime, date, marginal_co2_rate)
+# Some time stamps are missing entirely from the series. Fill in with missing values
+ts_fill <- seq.POSIXt(as.POSIXct("2022-10-07 00:00",tz="US/Eastern"), 
+                      as.POSIXct("2023-04-07 23:55",tz="US/Eastern"),
+                             by="5 min")
+# ,format='%m/%d/%y %H:%M:%S'
+
+ts_fill_df <- data.frame(datetime = ts_fill)
+
+me_data_filled <- left_join(ts_fill_df, me_data_orig, by="datetime") # Duplicate values for DS transition in November
+  
+# me_data <- me_data_filled %>%
+#   select(datetime, date, marginal_co2_rate)
+
+me_data <- me_data_filled %>%
+  group_by(datetime) %>% # # Duplicate values for DS transition in November. Take mean across duplicate timestamps
+  summarise(marginal_co2_rate = mean(marginal_co2_rate)) %>%
+  ungroup() %>%
+  mutate(date = as_date(datetime, tz="US/Eastern")) # , format = "%m/%d/%Y %I:%M:%S %p"
+
 ```
 
 One of the first steps of processing and cleaning the data was to check for outliers and missing values. Initial visualization revealed that there were some large outliers which appeared to be additive, with some observations in the millions compared to values of -168 and 7558 at the 1st and 99th percentile, respectively. Outlier values were identified and replaced using the Grubbs test and *rm.outlier()* function. This process updated the values for 1,288 observations, representing about 2.5% of the dataset. Visual checks on the series with updated values appears much more regular and aligns with expectations. No missing values were detected in the series. 
 
 ``` {r}
 # Initial Plots - look for outliers
-ggplot(me_data, aes(y=marginal_co2_rate, x=datetime)) +
-            geom_line()
+orig <-ggplot(me_data, aes(y=marginal_co2_rate, x=datetime)) +
+  geom_line(color="#619CFF") +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Original Series") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+orig
 
 # Check for how many outliers - some values in the millions.
 quantile(me_data$marginal_co2_rate, probs = c(0.01, .25, .5, .75, 0.99))
 q01 <- quantile(me_data$marginal_co2_rate, probs = c(0.01))
 q99 <- quantile(me_data$marginal_co2_rate, probs = c(0.99))
-
-length(me_data$datetime[(me_data$marginal_co2_rate<q01) | (me_data$marginal_co2_rate>q99)]) # 874 large outliers
 
 # Loop to remove all outliers with rm.outlier
 pvalue <- 0 #just making sure we enter the while loop
@@ -140,23 +162,135 @@ cat("Number of outliers removed: ",nout,"\n") # 2.5% of data.
 # Append to DF 
 me_data$me_co2_rate <- me_co2
 
-ggplot(me_data, aes(y=me_co2_rate, x=datetime)) +
-            geom_line() # Looks MUCH better
+filled <- ggplot(me_data, aes(y=me_co2_rate, x=datetime)) +
+  geom_line(color = "#619CFF") +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Series with Outliers Replaced") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
 
 # Check for negative values 
-length(me_data$datetime[me_data$marginal_co2_rate<0]) # 539 negative
+length(me_data$datetime[me_data$marginal_co2_rate<0]) # 793 negative
 
 # Check for zero values
-length(me_data$datetime[me_data$marginal_co2_rate==0]) # 175 == 0
+length(me_data$datetime[me_data$marginal_co2_rate==0]) # 366 == 0
 
 # Check for missing values
-sum(is.na(me_data$marginal_co2_rate))
+sum(is.na(me_data$marginal_co2_rate)) # 164
+
+check <- me_data %>%
+  filter(is.na(marginal_co2_rate)) %>%
+  mutate(hour = hour(datetime)) %>%
+  count(date, hour) 
+  # Look at date-hours where values are missing.
+  # Only 2 hours where all 12 values are missing - daylight savings and 2/22
+  
 ```
+
+```{r}
+# Compare Original Series and Series with Outliers Removed
+ggarrange(orig, filled)
+```
+
+```{r}
+# Create Hourly Data
+me_data_hourly <- me_data %>%
+  mutate(hour = hour(datetime)) %>%
+  group_by(date, hour) %>%
+  summarize(hourly_me_co2 = mean(me_co2_rate, na.rm=TRUE),
+            obs = n()) %>%
+  ungroup()
+
+me_data_hourly$datetime = ymd_hm(paste(me_data_hourly$date, me_data_hourly$hour, 0))
+
+# Check for missing values
+sum(is.na(me_data_hourly$hourly_me_co2)) # 1 observations, 2/22
+location_na <- which(is.na(me_data_hourly$hourly_me_co2))
+
+me_data_hourly$hourly_me_co2[location_na] <- (me_data_hourly$hourly_me_co2[location_na-1] + me_data_hourly$hourly_me_co2[location_na+1])/2 # Replace value with local mean
+
+# Whole Series
+ggplot(me_data_hourly, aes(y=hourly_me_co2, x=date)) +
+  geom_line(color = "#619CFF") +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Series with Outliers Replaced") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+# Day
+ggplot(me_data_hourly[me_data_hourly$date==ymd(20230406),], aes(y=hourly_me_co2, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Day") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+ggplot(me_data_hourly[me_data_hourly$date==ymd(20221222),], aes(y=hourly_me_co2, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Day") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+# Week
+ggplot(me_data_hourly[me_data_hourly$date>=ymd(20230226) & me_data_hourly$date<=ymd(20230301),], aes(y=hourly_me_co2, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Week") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+ggplot(me_data_hourly[me_data_hourly$date>=ymd(20221009) & me_data_hourly$date<=ymd(20221015),], aes(y=hourly_me_co2, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Week") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+# Month
+ggplot(me_data_hourly[me_data_hourly$date>=ymd(20230301) & me_data_hourly$date<=ymd(20230330),], aes(y=hourly_me_co2, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Month") +
+  ylab("Avg. Hourly Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+  
+```
+
 *Add a table that summarizes your data structure (variables, units, ranges and/or central tendencies, data source if multiple are used, etc.). This table should inserted as a `kable` function in an R chunk. Just show the first 10 rows of your data. Do not include the code used to generate your table.*
 ```{r}
 # Table to Summarize
-sum_stats <- me_data %>%
-  rename(meco2rate = me_co2_rate) %>%
+# sum_stats <- me_data %>%
+#   rename(meco2rate = me_co2_rate) %>%
+#   select(meco2rate) %>% # select variables to summarise
+#   summarise_each(funs(obs = n(),
+#                       min = min, 
+#                       q25 = quantile(., 0.25), 
+#                       median = median, 
+#                       q75 = quantile(., 0.75), 
+#                       max = max,
+#                       mean = mean, 
+#                       sd = sd)) %>%
+#   mutate(varname = "me_co2_rate",
+#          units = "lbs/MWh") %>%
+#   select(varname, units, everything())
+
+sum_stats <- me_data_hourly %>%
+  rename(meco2rate = hourly_me_co2) %>%
   select(meco2rate) %>% # select variables to summarise
   summarise_each(funs(obs = n(),
                       min = min, 
@@ -173,15 +307,59 @@ sum_stats <- me_data %>%
 kable(sum_stats, 
       col.names = c("Variable Name", "Unit", "Observations", "Minimum", "Q25", "Median", "Q75", "Maximum", "Mean", "Std. Dev."),
       caption = "Descriptive Statistics - DOM Five Minute Marginal Emissions (10/7/22 00:00 - 4/7/23 23:55)",
-      digits = array(1, ncol(sum_stats_long)),
+      digits = array(1, ncol(sum_stats)),
       table.attr = "style = \"color: black;\"") %>%
   kable_styling(full_width = FALSE, position = "center",latex_options = "hold_position")
 
 ```
 
+# Create TS Object with Multiple Seasonality
+```{r}
+# Five Minute
+me_data <- me_data %>% 
+  arrange(datetime)
+  
+ts_me <- msts(me_data$me_co2_rate,
+              seasonal.periods =c(12, 12*24, 12*24*7,12*24*365.25),
+              start=c(2022,10,7))
+
+head(date_decimal(as.numeric(time(ts_me))))
+# tail(date_decimal(as.numeric(time(ts_me))))
+
+# Hourly
+me_data_hourly <- me_data_hourly %>% 
+  arrange(datetime)
+
+ts_me_hourly <- msts(me_data_hourly$hourly_me_co2,
+                     seasonal.periods =c(24,168, 8760), # ,24*30
+                     start=2022+279/365)
+# as.POSIXct('2022-10-07 00:00', format ="%Y-%m-%d %H:%M")
+
+head(date_decimal(as.numeric(time(ts_me_hourly))))
+tail(date_decimal(as.numeric(time(ts_me_hourly))))
+
+check <- me_data_hourly %>%
+  group_by(date) %>%
+  summarise(hours = n())
+```
+
 #### Analysis (Methods and Models)
 
 *Describe the analysis and tests that were performed. Described the components of the time series you identified. List any packages and functions used. Include visualizations of your dataset (i.e. time series plot, ACF, PACF, etc).*
+
+# Decompose
+```{r}
+ts_me_hourly %>% mstl() %>%
+  autoplot()
+
+ts_me_hourly_decompose <- mstl(ts_me_hourly)
+
+# Check ACF and PACF 
+par(mfrow=c(1,2), mar=c(6, 4, 4, 2))  #place plot side by side
+Acf(ts_me_hourly_decompose[,5],lag.max=40, main="ACF") 
+Pacf(ts_me_hourly_decompose[,5], lag.max=40, main="PACF")
+
+```
 
 *Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.*
 
@@ -195,6 +373,64 @@ Summarize your major findings from your analyses in a few paragraphs and plots. 
 https://www.eia.gov/todayinenergy/detail.php?id=55960
 
 
+# Scrap Code
+``` {r}
+# Explore Different Levels of Seasonality - not seeing much
+# Day
+ggplot(me_data[me_data$date==ymd(20230406),], aes(y=me_co2_rate, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Day") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+# Week
+ggplot(me_data[me_data$date>=ymd(20230226) & me_data$date<=ymd(20230301),], aes(y=me_co2_rate, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Week") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+ggplot(me_data[me_data$date>=ymd(20221009) & me_data$date<=ymd(20221015),], aes(y=me_co2_rate, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Week") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+# Month
+ggplot(me_data[me_data$date>=ymd(20230301) & me_data$date<=ymd(20230330),], aes(y=me_co2_rate, x=datetime)) +
+  geom_line() +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "gray", fill=NA, linewidth=1)) +
+  labs(title ="Month") +
+  ylab("Marginal CO2 Emissions (lbs/MWh)") +
+  xlab("Datetime")
+
+```
+```{r}
+# Create Seasonality Table
+df_high_frequency_spec <- data.frame(
+  Data = c("Daily", "Hourly","Half-hourly", "Five Minute"),
+  Hour = c(" ", " ", "2", "12"),
+  Day = c(" ","24","2*24=48", "12*24=288"),
+  Week = c("7","24*7=168","2*24*7=336", "12*24*7=2016"),
+  Year = c("365.25","24*365.25=8766","2*24*365.25=17532", "12*24*365.25=105192")
+)
+
+kbl(df_high_frequency_spec, 
+    caption="Frequency used with msts() function", 
+    table.attr = "style = \"color: black;\"") %>% 
+  kable_styling(full_width = FALSE, position = "center",latex_options = "hold_position")
+```
 
 
 

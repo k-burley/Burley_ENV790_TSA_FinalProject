@@ -338,9 +338,21 @@ ts_me_hourly <- msts(me_data_hourly$hourly_me_co2,
 head(date_decimal(as.numeric(time(ts_me_hourly))))
 tail(date_decimal(as.numeric(time(ts_me_hourly))))
 
-check <- me_data_hourly %>%
-  group_by(date) %>%
-  summarise(hours = n())
+# Create training and testing data from the full ts object
+ts_me_hourly_train <- subset(ts_me_hourly,
+                          end = length(ts_me_hourly)-167) # 1 week, accounting for 2 missing hours at end of series
+ts_me_hourly_test <- subset(ts_me_hourly,
+                         start = length(ts_me_hourly)-166)
+
+head(date_decimal(as.numeric(time(ts_me_hourly_train))))
+tail(date_decimal(as.numeric(time(ts_me_hourly_train))))
+
+head(date_decimal(as.numeric(time(ts_me_hourly_test))))
+tail(date_decimal(as.numeric(time(ts_me_hourly_test))))
+
+# check <- me_data_hourly %>%
+#   group_by(date) %>%
+#   summarise(hours = n())
 ```
 
 #### Analysis (Methods and Models)
@@ -360,6 +372,31 @@ Acf(ts_me_hourly_decompose[,5],lag.max=40, main="ACF")
 Pacf(ts_me_hourly_decompose[,5], lag.max=40, main="PACF")
 
 ```
+```{r}
+# FIT MODELS
+# Model 1: SARIMA AutoFit
+SARIMA_auto_fit <- auto.arima(ts_me_hourly_train)
+checkresiduals(SARIMA_auto_fit)
+print(SARIMA_auto_fit)
+
+# Model 2: ARIMA with Fourier Terms
+ARIMA_Fourier_fit <- auto.arima(ts_me_hourly_train, 
+                             seasonal=FALSE, 
+                             lambda=0,
+                             xreg=fourier(ts_me_hourly_train, 
+                                          K=c(2,2,0)) # 2 daily cycles, 2 weekly cycles, 0 annual cycles
+                             )
+checkresiduals(ARIMA_Fourier_fit)
+
+# Model 3:  
+
+
+# Model 4:  
+
+
+# Model 5: 
+```
+
 
 *Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.*
 

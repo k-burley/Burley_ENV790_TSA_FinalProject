@@ -372,32 +372,190 @@ Acf(ts_me_hourly_decompose[,5],lag.max=40, main="ACF")
 Pacf(ts_me_hourly_decompose[,5], lag.max=40, main="PACF")
 
 ```
+# Fit and Forecast Models
+
 ```{r}
-# FIT MODELS
 # Model 1: SARIMA AutoFit
 SARIMA_auto_fit <- auto.arima(ts_me_hourly_train)
-checkresiduals(SARIMA_auto_fit)
-print(SARIMA_auto_fit)
+
+SARIMA_auto_for <- forecast(SARIMA_auto_fit,
+                           h=167) 
+
+accuracy(ARIMA_reg_forecast$mean, ts_demand_test)
 
 # Model 2: ARIMA with Fourier Terms
 ARIMA_Fourier_fit <- auto.arima(ts_me_hourly_train, 
                              seasonal=FALSE, 
                              lambda=0,
                              xreg=fourier(ts_me_hourly_train, 
-                                          K=c(2,2,0)) # 2 daily cycles, 2 weekly cycles, 0 annual cycles
+                                          K=c(6,2,0)) # 2 daily cycles, 2 weekly cycles, 0 annual cycles
                              )
-checkresiduals(ARIMA_Fourier_fit)
 
-# Model 3:  
+ARIMA_Fourier_for <- forecast(ARIMA_Fourier_fit,
+                           xreg=fourier(ts_me_hourly_train,
+                                        K=c(6,2,0),
+                                        h=167),
+                           h=167
+                           ) 
+
+accuracy(ARIMA_Fourier_for$mean, ts_me_hourly_test)
+
+# Model 3: TBATS ** not working?
+TBATS_fit <- tbats(ts_me_hourly_train)
+TBATS_for <- forecast(TBATS_fit, h=167)
+
+# Model 4: ETS - Error Trend Seasonal
+ETS_fit_for <-  stlf(ts_me_hourly_train,
+                     h=167)
 
 
-# Model 4:  
+# Model 5: Neural Network
+NN_fit <- nnetar(ts_me_hourly_train,
+                 p=1,
+                 P=0,
+                 xreg=fourier(ts_me_hourly_train, K=c(2,2,0)))
 
-
-# Model 5: 
+NN_for <- forecast(NN_fit, 
+                   h=167,
+                   xreg=fourier(ts_me_hourly_test, 
+                                          K=c(2,2,0),
+                                h=167))
 ```
 
+# Evaluate Models - Check Residuals
+```{r}
+# Model 1: SARIMA AutoFit
+checkresiduals(SARIMA_auto_fit)
 
+# Model 2: ARIMA with Fourier Terms
+checkresiduals(ARIMA_Fourier_fit)
+
+# Model 3: TBATS
+checkresiduals(TBATS_fit)
+
+# Model 4: ETS - Error Trend Seasonal
+checkresiduals(ETS_fit_for)
+
+# Model 5: Neural Network
+checkresiduals(NN_fit)
+
+```
+# Evaluate Models - Visual Comparison between Forecast + Test Data
+```{r}
+### Model 1: SARIMA AutoFit
+
+#Plot foresting results
+autoplot(SARIMA_auto_for) +
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+#Plot model + observed data
+autoplot(ts_me_hourly_test) +
+  autolayer(SARIMA_auto_for, series="Seasonal Arima",PI=FALSE)+
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+# Plot model and observed data during 2010
+plot(SARIMA_auto_for$mean,
+     xlab = "Date",
+     ylab = "Avg. Hourly Marginal Emissions Rate",
+     ylim = c(0, 4000))
+lines(ts_me_hourly_test,
+      type = "l",
+      col = 4,
+      lwd = 2)
+legend(2010, 10000, legend=c("Forecasting Results", "Last Week of Data (04/01/23-04/07/23)"),
+       col=c("black",4), lwd=3, cex=0.8)
+
+### Model 2: ARIMA with Fourier Terms
+
+#Plot foresting results
+autoplot(ARIMA_Fourier_for) +
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+#Plot model + observed data
+autoplot(ts_me_hourly_test) +
+  autolayer(ARIMA_Fourier_for, series="ARIMA with Fourier Terms",PI=FALSE)+
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+# Plot model and observed data during 2010
+plot(ARIMA_Fourier_for$mean,
+     xlab = "Date",
+     ylab = "Avg. Hourly Marginal Emissions Rate",
+     ylim = c(0, 4000))
+lines(ts_me_hourly_test,
+      type = "l",
+      col = 4,
+      lwd = 2)
+legend(2010, 10000, legend=c("Forecasting Results", "Last Week of Data (04/01/23-04/07/23)"),
+       col=c("black",4), lwd=3, cex=0.8)
+
+### Model 3: TBATS
+#Plot foresting results
+autoplot(TBATS_for) +
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+#Plot model + observed data
+autoplot(ts_me_hourly_test) +
+  autolayer(TBATS_for, series="TBATS",PI=FALSE)+
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+# Plot model and observed data during 2010
+plot(TBATS_for$mean,
+     xlab = "Date",
+     ylab = "Avg. Hourly Marginal Emissions Rate",
+     ylim = c(0, 4000))
+lines(ts_me_hourly_test,
+      type = "l",
+      col = 4,
+      lwd = 2)
+legend(2010, 10000, legend=c("Forecasting Results", "Last Week of Data (04/01/23-04/07/23)"),
+       col=c("black",4), lwd=3, cex=0.8)
+
+### Model 4: ETS - Error Trend Seasonal
+
+#Plot foresting results
+autoplot(ETS_fit_for) +
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+#Plot model + observed data
+autoplot(ts_me_hourly_test) +
+  autolayer(ETS_fit_for, series="TBATS",PI=FALSE)+
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+# Plot model and observed data during 2010
+plot(ETS_fit_for$mean,
+     xlab = "Date",
+     ylab = "Avg. Hourly Marginal Emissions Rate",
+     ylim = c(0, 4000))
+lines(ts_me_hourly_test,
+      type = "l",
+      col = 4,
+      lwd = 2)
+legend(2010, 10000, legend=c("Forecasting Results", "Last Week of Data (04/01/23-04/07/23)"),
+       col=c("black",4), lwd=3, cex=0.8)
+
+### Model 5: Neural Network
+
+autoplot(NN_for) +
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+#Plot model + observed data
+autoplot(ts_me_hourly_test) +
+  autolayer(NN_for, series="Neural Network",PI=FALSE)+
+  ylab("Avg. Hourly Marginal Emissions Rate") 
+
+# Plot model and observed data during 2010
+plot(NN_for$mean,
+     xlab = "Date",
+     ylab = "Avg. Hourly Marginal Emissions Rate",
+     ylim = c(0, 4000))
+lines(ts_me_hourly_test,
+      type = "l",
+      col = 4,
+      lwd = 2)
+legend(2010, 10000, legend=c("Forecasting Results", "Last Week of Data (04/01/23-04/07/23)"),
+       col=c("black",4), lwd=3, cex=0.8)
+
+```
 *Format your R chunks so that graphs are displayed but code is not displayed. Accompany these graphs with text sections that describe the visualizations and provide context for further analyses.*
 
 *Each figure should be accompanied by a caption, and referenced within the text if applicable.*
